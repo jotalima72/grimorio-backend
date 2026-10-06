@@ -37,6 +37,18 @@ Para React em outra porta, acrescente a origem correspondente ao CORS. O deploy 
 
 ## Convenções
 
+### Logs de warnings e errors
+
+Todas as rotas passam pelo mesmo registro de falhas. Respostas `4xx` geram um `warn`; respostas `5xx` geram um `error`. Conexões encerradas antes da resposta geram um warning com status de log `499`. Respostas bem-sucedidas não geram warnings ou errors.
+
+Cada evento é uma linha JSON com `timestamp`, `level`, `event`, `requestId`, `method`, `route`, `status`, `code` e `durationMs`. Quando já autenticado, inclui `userId`; erros internos incluem o tipo e código do erro técnico. `route` é o modelo da rota, como `/api/characters/:id`; caminhos desconhecidos aparecem como `[unmatched]`. O identificador também é enviado no header `X-Request-Id`.
+
+Os logs ficam na saída do processo, disponível na aba **Logs** do Render. Não registram corpo, query string, senhas, tokens, headers, email ou mensagens brutas de erros do banco. Exemplo:
+
+```json
+{"timestamp":"2026-10-06T15:00:00.000Z","level":"warn","event":"http_request_failed","requestId":"uuid-da-requisicao","method":"GET","route":"/api/spells","status":401,"code":"UNAUTHENTICATED","durationMs":2}
+```
+
 - JSON em UTF-8; requisições com corpo usam `Content-Type: application/json`.
 - Respostas de sucesso: `{ "data": ... }`. Listas de magias também incluem `meta` com `total`, `limit` e `offset`.
 - Respostas de erro: `{ "error": { "code": "...", "message": "..." } }`.
@@ -94,9 +106,9 @@ A limpeza e a troca são uma transação. Alterar apenas nome/nível não remove
 
 ## Catálogo e cards
 
-`GET /api/spells?name=&schoolId=&classId=&characterId=&limit=&offset=`
+`GET /api/spells?name=&schoolId=&classId=&characterId=&level=&limit=&offset=`
 
-Todos os filtros são opcionais e combináveis. `name` busca um trecho, ignorando acentos e maiúsculas. `%` e `_` são tratados como caracteres literais. `schoolId` filtra a escola; `classId`, os vínculos acessíveis da classe. `limit` tem padrão 100 e máximo 500; `offset` começa em zero.
+Todos os filtros são opcionais e combináveis. `name` busca um trecho, ignorando acentos e maiúsculas. `%` e `_` são tratados como caracteres literais. `level` filtra o círculo de 0 a 9 (0 corresponde a truques); omita o parâmetro para todos os círculos. `schoolId` filtra a escola; `classId`, os vínculos acessíveis da classe. `limit` tem padrão 100 e máximo 500; `offset` começa em zero.
 
 Com `characterId`, cada resultado também inclui `canPrepare` e `isPrepared`, calculados para o personagem autenticado. A classe selecionada como filtro não altera a elegibilidade do personagem.
 

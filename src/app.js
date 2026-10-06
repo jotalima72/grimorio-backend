@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { hashPassword, verifyPassword, createSession, tokenHash } from './auth.js';
 import { adaptDatabase } from './db-adapter.js';
 import { HttpError, fail, normalize, object, string, integer, queryInteger, ids, email, password } from './validation.js';
@@ -26,7 +27,7 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
   const route = (method,path,handler,isPublic=false) => {
     const keys=[];
     const pattern = new RegExp('^'+path.replace(/:([a-zA-Z]+)/g,(_,k)=>{keys.push(k);return '(\\d+)';})+'/?$');
-    routes.push({method,pattern,keys,handler,isPublic});
+    routes.push({method,path,pattern,keys,handler,isPublic});
   };
   const visible = (owner,userId) => owner === null || owner === userId;
   async function source(id,userId,own=false) {
@@ -166,7 +167,7 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
   });
   route('DELETE','/api/characters/:id',async ({params,user})=>{(await character(params.id,user.id));(await run('DELETE FROM characters WHERE id=?',params.id));return {status:204};});
   route('GET','/api/spells',async ({query,user})=>{
-    const allowed=['name','schoolId','classId','characterId','limit','offset'];
+    const allowed=['name','schoolId','classId','characterId','level','limit','offset'];
     for(const key of query.keys())if(!allowed.includes(key))fail(400,'VALIDATION_ERROR',`Filtro desconhecido: ${key}.`);
     const name=query.get('name')??'';if(name.length>200)fail(400,'VALIDATION_ERROR','Busca muito longa.');
     const limit=query.has('limit')?queryInteger(query.get('limit'),'limit',1,500):100;
@@ -174,6 +175,7 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
     let where=' WHERE (src.owner_user_id IS NULL OR src.owner_user_id=?) AND s.search_name LIKE ? ESCAPE \'\\\'';
     const args=[user.id,'%'+normalize(name).replace(/[\\%_]/g,'\\$&')+'%'];
     if(query.has('schoolId')){where+=' AND s.school_id=?';args.push(queryInteger(query.get('schoolId'),'schoolId'));}
+    if(query.has('level')){where+=' AND s.level=?';args.push(queryInteger(query.get('level'),'level',0,9));}
     if(query.has('classId')){
       const classId=queryInteger(query.get('classId'),'classId');(await classRecord(classId,user.id));
       where+=` AND EXISTS(SELECT 1 FROM class_spells cs JOIN sources ls ON ls.id=cs.source_id
@@ -232,20 +234,39 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
   });
 
   const server=createServer(async(req,res)=>{
+    const requestId=randomUUID(),started=performance.now();
+    let routePath='[unmatched]',responseCode,userId,internalError,logged=false;
+    res.setHeader('X-Request-Id',requestId);
+    const writeLog=(status)=>{
+      if(logged || status<400)return;
+      logged=true;
+      const level=status>=500?'error':'warn';
+      const safeCode=value=>typeof value==='string' && /^[A-Z0-9_]{1,64}$/.test(value)?value:undefined;
+      const entry={timestamp:new Date().toISOString(),level,event:'http_request_failed',requestId,
+        method:req.method,route:routePath,status,code:safeCode(responseCode),userId,
+        durationMs:Math.round(performance.now()-started)};
+      if(internalError)entry.error={type:/^[A-Za-z]{1,64}$/.test(internalError.name??'')?internalError.name:'Error',code:safeCode(internalError.code)};
+      // Não inclui corpo, query string, headers ou mensagens brutas do driver.
+      try{logger[level]?.(JSON.stringify(entry));}catch{/* Falha do logger não altera a resposta HTTP. */}
+    };
+    res.once('finish',()=>writeLog(res.statusCode));
+    res.once('close',()=>{if(!res.writableFinished){responseCode='REQUEST_ABORTED';writeLog(499);}});
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','no-store');
     const send=(status,payload)=>{
+      responseCode=payload?.error?.code;
       res.statusCode=status;if(status===204){res.end();return;}
       res.setHeader('Content-Type','application/json; charset=utf-8');res.end(JSON.stringify(payload));
     };
     try {
+      const url=new URL(req.url,'http://localhost');
+      const candidates=routes.filter(r=>r.pattern.test(url.pathname));
+      const found=candidates.find(r=>r.method===req.method);
+      routePath=found?.path ?? candidates[0]?.path ?? '[unmatched]';
       const origin=req.headers.origin;
       if(origin){if(!corsOrigins.includes(origin))fail(403,'CORS_FORBIDDEN','Origem não autorizada.');res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');}
       if(req.method==='OPTIONS'){
         res.setHeader('Access-Control-Allow-Methods','GET,POST,PATCH,PUT,DELETE,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Authorization,Content-Type');res.setHeader('Access-Control-Max-Age','600');send(204);return;
       }
-      const url=new URL(req.url,'http://localhost');
-      const candidates=routes.filter(r=>r.pattern.test(url.pathname));
-      const found=candidates.find(r=>r.method===req.method);
       if(!found){if(candidates.length){res.setHeader('Allow',candidates.map(r=>r.method).join(', '));fail(405,'METHOD_NOT_ALLOWED','Método não permitido.');}fail(404,'NOT_FOUND','Rota não encontrada.');}
       const match=url.pathname.match(found.pattern),params={};found.keys.forEach((k,i)=>params[k]=queryInteger(match[i+1],k));
       let user,session;
@@ -255,6 +276,7 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
         session=tokenHash(token);
         user=(await get(`SELECT u.id,u.name,u.email FROM users u JOIN sessions ses ON ses.user_id=u.id WHERE ses.token_hash=? AND ses.expires_at>?`,session,Date.now()));
         if(!user)fail(401,'UNAUTHENTICATED','Sessão inválida ou expirada.');
+        userId=user.id;
       }
       if(url.pathname==='/api/auth/login' || url.pathname==='/api/auth/register'){
         const now=Date.now();for(const [k,v] of buckets)if(v.until<=now)buckets.delete(k);
@@ -278,7 +300,7 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
       if(error instanceof HttpError){send(error.status,{error:{code:error.code,message:error.message}});return;}
       if(error.code==='23505' || (error.code?.startsWith('ERR_SQLITE') && /UNIQUE constraint failed/.test(error.message))){send(409,{error:{code:'CONFLICT',message:'Já existe um registro com esses dados nesta origem.'}});return;}
       if(['23503','23514','P0001'].includes(error.code) || (error.code?.startsWith('ERR_SQLITE') && /constraint failed|Magia|Desprepare|imutável/.test(error.message))){send(409,{error:{code:'CONSTRAINT_VIOLATION',message:'A operação viola uma regra do banco.'}});return;}
-      logger.error(error);send(500,{error:{code:'INTERNAL_ERROR',message:'Erro interno do servidor.'}});
+      internalError=error;send(500,{error:{code:'INTERNAL_ERROR',message:'Erro interno do servidor.'}});
     }
   });
   server.requestTimeout=30000;server.headersTimeout=15000;

@@ -69,6 +69,19 @@ test('contrato completo: autenticação, catálogo, personagens, homebrew e prep
     classes=(await request('/api/classes',{token})).data;schools=(await request('/api/schools',{token})).data;
     assert.equal(classes.length,8);assert.equal(schools.length,8);
     const r=await request('/api/spells?limit=500',{token});assert.equal(r.data.length,391);assert.equal(r.meta.total,391);
+    for(const level of [0,1,9]) {
+      const expected=r.data.filter(s=>s.level===level);
+      const filtered=await request(`/api/spells?level=${level}&limit=500`,{token});
+      assert.equal(filtered.status,200);
+      assert.equal(filtered.meta.total,expected.length);
+      assert.deepEqual(filtered.data.map(s=>s.id),expected.map(s=>s.id));
+      const page=await request(`/api/spells?level=${level}&limit=2&offset=1`,{token});
+      assert.equal(page.meta.total,expected.length);
+      assert.deepEqual(page.data.map(s=>s.id),expected.slice(1,3).map(s=>s.id));
+    }
+    const combined=await request('/api/spells?level=0&name=moribundos&schoolId=2',{token});
+    assert.ok(combined.data.every(s=>s.level===0&&s.schoolId===2));
+    for(const value of ['10','-1','1.5','abc','']) assert.equal((await request(`/api/spells?level=${value}`,{token})).status,400);
     assert.equal(r.data[0].description,undefined);assert.equal(r.data[0].original_entry_json,undefined);
     const search=await request('/api/spells?name=emocoes',{token});assert.equal(search.data[0].name,'Acalmar Emoções');
     const a=(await request('/api/spells/2',{token})).data;
