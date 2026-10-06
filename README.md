@@ -207,3 +207,10 @@ Referências usadas: [SQLite nativo no Node.js](https://nodejs.org/download/rele
 `GET /api/spells` executa filtros e paginação no banco. A elegibilidade das magias é consultada em lote: uma busca com personagem e filtro de classe executa oito consultas, tanto para uma quanto para 40 magias (incluindo autenticação). Antes, 40 consultas de elegibilidade eram executadas sequencialmente por página.
 
 Todas as respostas incluem `Server-Timing: api;dur=...`, com a duração de processamento da API em milissegundos. Esse tempo inclui esperas por conexão e consultas ao banco, mas não mede a transferência pela rede ou a espera anterior ao início do processo no Render. No DevTools, compare o header com o tempo total da requisição. Valores altos no header apontam para processamento/conexão ao banco; total alto com header baixo aponta para rede, proxy ou retomada do serviço. Confira também se Render e Supabase usam regiões próximas.
+### Adicionar vínculos homebrew em lote
+
+`GET /api/spells?excludeClassId=ID` retorna apenas magias acessíveis ao usuário que ainda não têm vínculo acessível com a classe. Combina com nome, escola, círculo e paginação.
+
+`POST /api/classes/:id/spells/batch` recebe `{"spellIds":[1,2,3]}` (1 a 500 IDs únicos). A inclusão usa uma transação e um INSERT em lote. Novos vínculos são atribuídos à origem homebrew do usuário; vínculos já acessíveis são ignorados. Se qualquer magia não existir ou for privada de outra conta, nenhum vínculo é adicionado. O texto e a origem da magia são preservados.
+
+Resposta: `{"data":{"classId":2,"sourceId":3,"added":3,"skipped":0}}`. Esta operação também permite estender a lista de uma classe oficial, com os novos vínculos visíveis apenas na conta de quem os criou.

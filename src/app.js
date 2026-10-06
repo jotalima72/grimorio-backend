@@ -141,6 +141,24 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
       return {status:existing?200:201,data:{id,classId:params.id,spellId,sourceId}};
     }));
   });
+  route('POST','/api/classes/:id/spells/batch',async ({params,body,user})=>{
+    object(body,['spellIds']);const spellIds=ids(body.spellIds,'spellIds',500);
+    if(!spellIds.length)fail(400,'VALIDATION_ERROR','Selecione pelo menos uma magia.');
+    await classRecord(params.id,user.id);
+    return await transaction(db,async ()=>{
+      const marks=spellIds.map(()=>'?').join(',');
+      const available=await all(`SELECT s.id FROM spells s JOIN sources src ON src.id=s.source_id
+       WHERE s.id IN (${marks}) AND (src.owner_user_id IS NULL OR src.owner_user_id=?)`,...spellIds,user.id);
+      if(available.length!==spellIds.length)fail(404,'NOT_FOUND','Uma ou mais magias não estão disponíveis. Nenhum vínculo foi adicionado.');
+      const sourceId=await homebrewSource(user.id);
+      const result=await run(`INSERT INTO class_spells(class_id,spell_id,source_id)
+       SELECT ?,s.id,? FROM spells s WHERE s.id IN (${marks})
+       AND NOT EXISTS(SELECT 1 FROM class_spells cs JOIN sources ls ON ls.id=cs.source_id
+         WHERE cs.class_id=? AND cs.spell_id=s.id AND (ls.owner_user_id IS NULL OR ls.owner_user_id=?))
+       ON CONFLICT(class_id,spell_id,source_id) DO NOTHING`,params.id,sourceId,...spellIds,params.id,user.id);
+      return {data:{classId:params.id,sourceId,added:result.changes,skipped:spellIds.length-result.changes}};
+    });
+  });
   route('GET','/api/characters',async ({user})=>({data:(await all(`SELECT c.id,c.name,c.level,c.class_id AS classId,cl.name AS class,c.created_at AS createdAt,
    (SELECT COUNT(*) FROM prepared_spells p WHERE p.character_id=c.id) AS preparedCount
    FROM characters c JOIN classes cl ON cl.id=c.class_id WHERE c.user_id=? ORDER BY c.id`,user.id))}));
@@ -167,7 +185,7 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
   });
   route('DELETE','/api/characters/:id',async ({params,user})=>{(await character(params.id,user.id));(await run('DELETE FROM characters WHERE id=?',params.id));return {status:204};});
   route('GET','/api/spells',async ({query,user})=>{
-    const allowed=['name','schoolId','classId','characterId','level','limit','offset'];
+    const allowed=['name','schoolId','classId','excludeClassId','characterId','level','limit','offset'];
     for(const key of query.keys())if(!allowed.includes(key))fail(400,'VALIDATION_ERROR',`Filtro desconhecido: ${key}.`);
     const name=query.get('name')??'';if(name.length>200)fail(400,'VALIDATION_ERROR','Busca muito longa.');
     const limit=query.has('limit')?queryInteger(query.get('limit'),'limit',1,500):100;
@@ -179,6 +197,12 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
     if(query.has('classId')){
       const classId=queryInteger(query.get('classId'),'classId');(await classRecord(classId,user.id));
       where+=` AND EXISTS(SELECT 1 FROM class_spells cs JOIN sources ls ON ls.id=cs.source_id
+       WHERE cs.spell_id=s.id AND cs.class_id=? AND (ls.owner_user_id IS NULL OR ls.owner_user_id=?))`;
+      args.push(classId,user.id);
+    }
+    if(query.has('excludeClassId')){
+      const classId=queryInteger(query.get('excludeClassId'),'excludeClassId');await classRecord(classId,user.id);
+      where+=` AND NOT EXISTS(SELECT 1 FROM class_spells cs JOIN sources ls ON ls.id=cs.source_id
        WHERE cs.spell_id=s.id AND cs.class_id=? AND (ls.owner_user_id IS NULL OR ls.owner_user_id=?))`;
       args.push(classId,user.id);
     }

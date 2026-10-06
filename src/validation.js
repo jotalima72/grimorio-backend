@@ -21,8 +21,8 @@ export function queryInteger(value, field, min = 1, max = Number.MAX_SAFE_INTEGE
   if (!/^\d+$/.test(value)) fail(400,'VALIDATION_ERROR',`${field} inválido.`);
   return integer(Number(value),field,min,max);
 }
-export function ids(value, field = 'classIds') {
-  if (!Array.isArray(value) || value.length > 100) fail(400,'VALIDATION_ERROR',`${field} deve ser uma lista de até 100 IDs.`);
+export function ids(value, field = 'classIds', max = 100) {
+  if (!Array.isArray(value) || value.length > max) fail(400,'VALIDATION_ERROR',`${field} deve ser uma lista de até ${max} IDs.`);
   const result = value.map(v => integer(v,field));
   if (new Set(result).size !== result.length) fail(400,'VALIDATION_ERROR',`${field} não pode repetir IDs.`);
   return result;

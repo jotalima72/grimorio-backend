@@ -45,6 +45,39 @@ async function fixture(options={}) {
   return {db,server,base,request,register,close};
 }
 
+test('vínculos homebrew em lote: exclusão, isolamento, repetição e rollback',async t=>{
+  const f=await fixture();t.after(f.close);const {request,register,db}=f;
+  const ana=await register('lote-ana'),beto=await register('lote-beto');
+  const token=ana.token;
+  const classes=(await request('/api/classes',{token})).data;
+  const classId=classes.find(c=>c.name==='Clérigo').id;
+  const before=await request(`/api/spells?excludeClassId=${classId}&limit=500`,{token});
+  assert.equal(before.status,200);assert.ok(before.data.length>2);
+  const spellIds=before.data.slice(0,2).map(s=>s.id);
+  const textBefore=(await request(`/api/spells/${spellIds[0]}`,{token})).data.description;
+  const path=`/api/classes/${classId}/spells/batch`;
+  const added=await request(path,{method:'POST',token,body:{spellIds}});
+  assert.equal(added.status,200);assert.equal(added.data.added,2);assert.equal(added.data.skipped,0);
+  const source=(await db.prepare('SELECT kind,owner_user_id AS ownerUserId FROM sources WHERE id=?').get(added.data.sourceId));
+  assert.equal(source.kind,'homebrew');assert.equal(source.ownerUserId,ana.user.id);
+  const after=await request(`/api/spells?excludeClassId=${classId}&limit=500`,{token});
+  assert.equal(after.meta.total,before.meta.total-2);assert.ok(after.data.every(s=>!spellIds.includes(s.id)));
+  assert.equal((await request(`/api/spells?excludeClassId=${classId}&limit=500`,{token:beto.token})).meta.total,before.meta.total);
+  assert.equal((await request(`/api/spells/${spellIds[0]}`,{token})).data.description,textBefore);
+  const repeated=await request(path,{method:'POST',token,body:{spellIds}});
+  assert.equal(repeated.data.added,0);assert.equal(repeated.data.skipped,2);
+  const pending=after.data[0].id;
+  assert.equal((await request(path,{method:'POST',token,body:{spellIds:[pending,999999]}})).status,404);
+  assert.equal((await request(`/api/spells?excludeClassId=${classId}&limit=500`,{token})).meta.total,after.meta.total);
+  for(const ids of [[],[pending,pending],Array.from({length:501},(_,i)=>i+1)])assert.equal((await request(path,{method:'POST',token,body:{spellIds:ids}})).status,400);
+  const privateClass=await request('/api/classes',{method:'POST',token,body:{name:'Classe privada'}});
+  assert.equal((await request(`/api/classes/${privateClass.data.id}/spells/batch`,{method:'POST',token:beto.token,body:{spellIds}})).status,404);
+  assert.equal((await request(`/api/spells?excludeClassId=${privateClass.data.id}`,{token:beto.token})).status,404);
+  const privateSpell=await request('/api/spells',{method:'POST',token:beto.token,body:{name:'Segredo do lote',level:1,schoolId:1,components:'V',castingTime:'Ação',range:'Toque',duration:'Instantânea',description:'Descrição privada.'}});
+  assert.equal(privateSpell.status,201);
+  assert.equal((await request(path,{method:'POST',token,body:{spellIds:[pending,privateSpell.data.id]}})).status,404);
+});
+
 test('contrato completo: autenticação, catálogo, personagens, homebrew e preparação',async t=>{
   const f=await fixture();t.after(f.close);const {request,register,db}=f;
   let ana,beto,token,classes,schools,c,privateSource,newClass,newSpell;
