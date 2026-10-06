@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: grimorio-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: require
+      - key: DATABASE_POOL_MAX
+        value: "5"
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SESSION_TTL_HOURS
+        value: "168"

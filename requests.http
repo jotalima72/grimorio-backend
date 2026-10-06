@@ -1,0 +1,69 @@
+@base = http://127.0.0.1:3000
+@token = COLE_O_TOKEN_DO_LOGIN
+@characterId = 1
+@spellId = 2
+
+### Health
+GET {{base}}/api/health
+
+### Cadastro (troque nome/email/senha)
+POST {{base}}/api/auth/register
+Content-Type: application/json
+
+{"name":"Jogador","email":"jogador@example.com","password":"Troque-esta-senha-123"}
+
+### Login
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{"email":"jogador@example.com","password":"Troque-esta-senha-123"}
+
+### Classes acessíveis
+GET {{base}}/api/classes
+Authorization: Bearer {{token}}
+
+### Escolas
+GET {{base}}/api/schools
+Authorization: Bearer {{token}}
+
+### Crie um personagem com classId retornado pelas classes
+POST {{base}}/api/characters
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"name":"Meu personagem","classId":2,"level":1}
+
+### Catálogo completo
+GET {{base}}/api/spells?limit=500
+Authorization: Bearer {{token}}
+
+### Busca e indicação de preparação
+GET {{base}}/api/spells?name=moribundos&characterId={{characterId}}
+Authorization: Bearer {{token}}
+
+### Dados do card
+GET {{base}}/api/spells/{{spellId}}
+Authorization: Bearer {{token}}
+
+### Preparar
+PUT {{base}}/api/characters/{{characterId}}/prepared-spells/{{spellId}}
+Authorization: Bearer {{token}}
+
+### Preparadas
+GET {{base}}/api/characters/{{characterId}}/prepared-spells
+Authorization: Bearer {{token}}
+
+### Despreparar
+DELETE {{base}}/api/characters/{{characterId}}/prepared-spells/{{spellId}}
+Authorization: Bearer {{token}}
+
+### Nova magia homebrew (consulte os IDs)
+POST {{base}}/api/spells
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"name":"Chama Azul","level":1,"schoolId":6,"components":"V, S","castingTime":"Ação","range":"18 metros","duration":"Instantânea","description":"Descrição completa, sem reescrita.","classIds":[2]}
+
+### Sair
+POST {{base}}/api/auth/logout
+Authorization: Bearer {{token}}
