@@ -201,3 +201,9 @@ As seleções são independentes por personagem. Não há regras automáticas de
 Os testes cobrem cadastro/login/logout, expiração, isolamento entre usuários, preservação de texto, filtros, criação/edição homebrew, extensão de listas de classes, conflitos, preparação idempotente, troca de classe, exclusão, CORS, limites e migrações. Nenhum teste grava no banco de trabalho.
 
 Referências usadas: [SQLite nativo no Node.js](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html), [scrypt e comparação de hashes](https://nodejs.org/api/crypto.html), [chaves estrangeiras no SQLite](https://www.sqlite.org/foreignkeys.html).
+
+### Desempenho das buscas
+
+`GET /api/spells` executa filtros e paginação no banco. A elegibilidade das magias é consultada em lote: uma busca com personagem e filtro de classe executa oito consultas, tanto para uma quanto para 40 magias (incluindo autenticação). Antes, 40 consultas de elegibilidade eram executadas sequencialmente por página.
+
+Todas as respostas incluem `Server-Timing: api;dur=...`, com a duração de processamento da API em milissegundos. Esse tempo inclui esperas por conexão e consultas ao banco, mas não mede a transferência pela rede ou a espera anterior ao início do processo no Render. No DevTools, compare o header com o tempo total da requisição. Valores altos no header apontam para processamento/conexão ao banco; total alto com header baixo aponta para rede, proxy ou retomada do serviço. Confira também se Render e Supabase usam regiões próximas.

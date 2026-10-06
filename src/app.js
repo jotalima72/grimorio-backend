@@ -187,7 +187,15 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
     if(query.has('characterId')){
       const c=(await character(queryInteger(query.get('characterId'),'characterId'),user.id));
       const prepared=new Set((await all('SELECT cs.spell_id AS id FROM prepared_spells p JOIN class_spells cs ON cs.id=p.class_spell_id WHERE p.character_id=?',c.id)).map(s=>s.id));
-      for(const s of data){s.canPrepare=!!(await resolveLink(c,s.id,user.id));s.isPrepared=prepared.has(s.id);}
+      const eligible=new Set(data.length ? (await all(`SELECT DISTINCT cs.spell_id AS id
+       FROM class_spells cs JOIN sources ls ON ls.id=cs.source_id
+       JOIN spells s ON s.id=cs.spell_id JOIN sources ss ON ss.id=s.source_id
+       JOIN classes cl ON cl.id=cs.class_id JOIN sources cls ON cls.id=cl.source_id
+       WHERE cs.class_id=? AND cs.spell_id IN (${data.map(()=>'?').join(',')})
+       AND (ls.owner_user_id IS NULL OR ls.owner_user_id=?)
+       AND (ss.owner_user_id IS NULL OR ss.owner_user_id=?)
+       AND (cls.owner_user_id IS NULL OR cls.owner_user_id=?)`,c.classId,...data.map(s=>s.id),user.id,user.id,user.id)).map(s=>s.id) : []);
+      for(const s of data){s.canPrepare=eligible.has(s.id);s.isPrepared=prepared.has(s.id);}
     }
     return {data,meta:{total,limit,offset}};
   });
@@ -254,6 +262,7 @@ export function createApp({ db, corsOrigins = ['http://localhost:5173','http://1
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','no-store');
     const send=(status,payload)=>{
       responseCode=payload?.error?.code;
+      res.setHeader('Server-Timing',`api;dur=${(performance.now()-started).toFixed(1)}`);
       res.statusCode=status;if(status===204){res.end();return;}
       res.setHeader('Content-Type','application/json; charset=utf-8');res.end(JSON.stringify(payload));
     };
